@@ -219,11 +219,11 @@ func (t *Tokenizer) Save(modelName string) error {
 }
 
 func (t *Tokenizer) Load(modelName string) error {
-	if filepath.Ext(modelName) != ".model" {
+	modelPath := filepath.FromSlash(modelName)
+	if filepath.Ext(modelPath) != ".model" {
 		return fmt.Errorf("model file should have .model extension")
 	}
-
-	b, err := os.ReadFile(modelName)
+	b, err := os.ReadFile(modelPath)
 	if err != nil {
 		return err
 	}
