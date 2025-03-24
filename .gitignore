@@ -26,3 +26,8 @@ env.bak/
 tls/
 
 *.prof
+
+# llm stuff
+models/**/*
+*.model
+*.vocab

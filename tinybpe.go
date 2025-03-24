@@ -1,9 +1,14 @@
 package tinybpe
 
 import (
+	"bytes"
+	"cmp"
+	"fmt"
 	"log"
 	"maps"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -33,9 +38,9 @@ func replacePairWithNewToken(pair Pair, newTokenId TokenId, ids []TokenId) []Tok
 }
 
 type Tokenizer struct {
-	vocab        map[TokenId][]byte
-	vocabSize    int
-	inverseVocab map[Pair]TokenId
+	vocab     map[TokenId][]byte
+	vocabSize int
+	merges    map[Pair]TokenId
 }
 
 func NewTokenizer(vocabSize int) *Tokenizer {
@@ -48,9 +53,10 @@ func NewTokenizer(vocabSize int) *Tokenizer {
 		vocab[TokenId(i)] = []byte{byte(i)}
 	}
 	tokenizer.vocab = vocab
-	tokenizer.inverseVocab = make(map[Pair]TokenId)
+	tokenizer.merges = make(map[Pair]TokenId)
 	return &tokenizer
 }
+
 func (t *Tokenizer) getMaxPair(ids []TokenId) Pair {
 	counts := make(map[Pair]int, len(ids)/2)
 	var pair, maxPair Pair
@@ -78,8 +84,10 @@ func (t *Tokenizer) getMinPair(ids []TokenId) Pair {
 	}
 	minCount := TokenId(maxVocabSize)
 	minPair := Pair{Left: minCount, Right: minCount}
-	for pr := range maps.Keys(counts) {
-		tokenId, ok := t.inverseVocab[pr]
+	for _, pr := range slices.Backward(slices.SortedStableFunc(maps.Keys(counts), func(a, b Pair) int {
+		return cmp.Compare(counts[a], counts[b])
+	})) {
+		tokenId, ok := t.merges[pr]
 		if ok && tokenId < minCount {
 			minCount = tokenId
 			minPair = pr
@@ -87,23 +95,46 @@ func (t *Tokenizer) getMinPair(ids []TokenId) Pair {
 	}
 	return minPair
 }
-func (t *Tokenizer) Train(path string) {
+func joinBytes(bs ...[]byte) []byte {
+	n := 0
+	for _, v := range bs {
+		n += len(v)
+	}
+	b, i := make([]byte, n), 0
+	for _, v := range bs {
+		i += copy(b[i:], v)
+	}
+	return b
+}
+
+func (t *Tokenizer) Train(path string, verbose bool) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		log.Fatalln("Failed opening file")
+		return err
 	}
 	ids := make([]TokenId, len(b))
 	for i := range b {
 		ids[i] = TokenId(b[i])
 	}
-	for i := range t.vocabSize - minVocabSize {
+	iterNum := t.vocabSize - minVocabSize
+	for i := range iterNum {
 		maxPair := t.getMaxPair(ids)
 		newTokenId := TokenId(minVocabSize + i)
-		t.vocab[newTokenId] = append(t.vocab[maxPair.Left], t.vocab[maxPair.Right]...)
-		t.inverseVocab[maxPair] = newTokenId
+		t.vocab[newTokenId] = joinBytes(t.vocab[maxPair.Left], t.vocab[maxPair.Right])
+		t.merges[maxPair] = newTokenId
 		ids = replacePairWithNewToken(maxPair, newTokenId, ids)
+		if verbose {
+			fmt.Printf("Iteration %d/%d: [%d, %d] -> %d (%q)\n", i+1,
+				iterNum,
+				maxPair.Left,
+				maxPair.Right,
+				newTokenId,
+				t.vocab[newTokenId])
+		}
 	}
+	return nil
 }
+
 func (t *Tokenizer) Decode(ids []TokenId) string {
 	var sb strings.Builder
 	for _, idx := range ids {
@@ -122,7 +153,67 @@ func (t *Tokenizer) Encode(text string) []TokenId {
 		if pair.Left == TokenId(maxVocabSize) || pair.Right == TokenId(maxVocabSize) {
 			break
 		}
-		ids = replacePairWithNewToken(pair, t.inverseVocab[pair], ids)
+		ids = replacePairWithNewToken(pair, t.merges[pair], ids)
 	}
 	return ids
+}
+
+func (t *Tokenizer) buildVocabFromMerges() {
+	vocab := make(map[TokenId][]byte, minVocabSize)
+	for i := range minVocabSize {
+		vocab[TokenId(i)] = []byte{byte(i)}
+	}
+	t.vocab = vocab
+	for _, pair := range slices.SortedStableFunc(maps.Keys(t.merges), func(a, b Pair) int {
+		return cmp.Compare(t.merges[a], t.merges[b])
+	}) {
+		t.vocab[t.merges[pair]] = joinBytes(t.vocab[pair.Left], t.vocab[pair.Right])
+	}
+}
+
+func makeDirectoryIfNotExists(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return os.Mkdir(path, os.ModeDir|0755)
+	}
+	return nil
+}
+
+func (t *Tokenizer) Save(modelName string) error {
+	if err := makeDirectoryIfNotExists("models"); err != nil {
+		return err
+	}
+	var bb bytes.Buffer
+	bb.WriteString(Version)
+	bb.WriteString("\n")
+	for _, pair := range slices.SortedStableFunc(maps.Keys(t.merges), func(a, b Pair) int {
+		return cmp.Compare(t.merges[a], t.merges[b])
+	}) {
+		bb.WriteString(fmt.Sprintf("%d %d\n", pair.Left, pair.Right))
+	}
+	basePath := filepath.FromSlash(modelName)
+	modelPath := filepath.Join("models", fmt.Sprintf("%s.model", basePath))
+	if err := os.WriteFile(modelPath, bb.Bytes(), 0644); err != nil {
+		return err
+	}
+	bb.Reset()
+	invMerges := make(map[TokenId]Pair, len(t.merges))
+	for pair, idx := range maps.All(t.merges) {
+		invMerges[idx] = pair
+	}
+	for _, idx := range slices.SortedStableFunc(maps.Keys(t.vocab), func(a, b TokenId) int {
+		return cmp.Compare(a, b)
+	}) {
+		mergedToken := t.vocab[idx]
+		pair, ok := invMerges[idx]
+		if ok {
+			bb.WriteString(fmt.Sprintf("[%q][%q] -> [%q] %d\n", t.vocab[pair.Left], t.vocab[pair.Right], mergedToken, idx))
+		} else {
+			bb.WriteString(fmt.Sprintf("[%q] %d\n", mergedToken, idx))
+		}
+	}
+	vocabPath := filepath.Join("models", fmt.Sprintf("%s.vocab", basePath))
+	if err := os.WriteFile(vocabPath, bb.Bytes(), 0644); err != nil {
+		return err
+	}
+	return nil
 }
