@@ -70,8 +70,7 @@ func NewTokenizer(vocabSize int) *Tokenizer {
 	return &tokenizer
 }
 
-func (t *Tokenizer) getMaxPair(ids []TokenId) Pair {
-	counts := make(map[Pair]int, len(ids)/2)
+func (t *Tokenizer) getMaxPair(ids []TokenId, counts map[Pair]int) Pair {
 	var pair, maxPair Pair
 	var count, maxCount int
 	for i := range len(ids) - 1 {
@@ -86,8 +85,7 @@ func (t *Tokenizer) getMaxPair(ids []TokenId) Pair {
 	return maxPair
 }
 
-func (t *Tokenizer) getMinPair(ids []TokenId) Pair {
-	counts := make(map[Pair]int, len(ids)/2)
+func (t *Tokenizer) getMinPair(ids []TokenId, counts map[Pair]int) Pair {
 	var pair Pair
 	var count int
 	for i := range len(ids) - 1 {
@@ -130,20 +128,23 @@ func (t *Tokenizer) Train(path string, verbose bool) error {
 		ids[i] = TokenId(b[i])
 	}
 	iterNum := t.vocabSize - minVocabSize
+	counts := make(map[Pair]int, len(ids)/2)
 	for i := range iterNum {
-		maxPair := t.getMaxPair(ids)
+		maxPair := t.getMaxPair(ids, counts)
 		newTokenId := TokenId(minVocabSize + i)
 		t.vocab[newTokenId] = joinBytes(t.vocab[maxPair.Left], t.vocab[maxPair.Right])
 		t.merges[maxPair] = newTokenId
 		ids = replacePairWithNewToken(maxPair, newTokenId, ids)
 		if verbose {
-			fmt.Printf("Iteration %d/%d: [%d, %d] -> %d [%q]\n", i+1,
+			fmt.Printf("Iteration %d/%d: [%d, %d] -> %d [%q] %d occurrences\n", i+1,
 				iterNum,
 				maxPair.Left,
 				maxPair.Right,
 				newTokenId,
-				t.vocab[newTokenId])
+				t.vocab[newTokenId],
+				counts[maxPair])
 		}
+		clear(counts)
 	}
 	return nil
 }
@@ -161,12 +162,14 @@ func (t *Tokenizer) Encode(text string) []TokenId {
 	for i, idx := range []byte(text) {
 		ids[i] = TokenId(idx)
 	}
+	counts := make(map[Pair]int, len(ids)/2)
 	for len(ids) >= 2 {
-		pair := t.getMinPair(ids)
+		pair := t.getMinPair(ids, counts)
 		if pair.Left == TokenId(maxVocabSize) || pair.Right == TokenId(maxVocabSize) {
 			break
 		}
 		ids = replacePairWithNewToken(pair, t.merges[pair], ids)
+		clear(counts)
 	}
 	return ids
 }
