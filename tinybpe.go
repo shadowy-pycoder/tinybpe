@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	minVocabSize int = 256
-	maxVocabSize int = int(^uint(0) >> 1)
-	crlf             = "\r\n"
+	minVocabSize int    = 256
+	maxVocabSize int    = int(^uint(0) >> 1)
+	crlf         string = "\r\n"
 )
 
 type TokenId int
@@ -26,10 +26,8 @@ type Pair struct {
 	Right TokenId
 }
 
-func replacePairWithNewToken(pair Pair, newTokenId TokenId, ids []TokenId) []TokenId {
-	newIds := make([]TokenId, 0, len(ids))
-	idx := 0
-	for idx < len(ids) {
+func replacePairWithNewToken(pair Pair, newTokenId TokenId, ids, newIds []TokenId) []TokenId {
+	for idx := 0; idx < len(ids); {
 		if ids[idx] == pair.Left && idx < len(ids)-1 && ids[idx+1] == pair.Right {
 			newIds = append(newIds, newTokenId)
 			idx += 2
@@ -129,12 +127,13 @@ func (t *Tokenizer) Train(path string, verbose bool) error {
 	}
 	iterNum := t.vocabSize - minVocabSize
 	counts := make(map[Pair]int, len(ids)/2)
+	newIds := make([]TokenId, 0, len(ids))
 	for i := range iterNum {
 		maxPair := t.getMaxPair(ids, counts)
 		newTokenId := TokenId(minVocabSize + i)
 		t.vocab[newTokenId] = joinBytes(t.vocab[maxPair.Left], t.vocab[maxPair.Right])
 		t.merges[maxPair] = newTokenId
-		ids = replacePairWithNewToken(maxPair, newTokenId, ids)
+		ids = replacePairWithNewToken(maxPair, newTokenId, ids, newIds)
 		if verbose {
 			fmt.Printf("Iteration %d/%d: [%d, %d] -> %d [%q] %d occurrences\n", i+1,
 				iterNum,
@@ -145,6 +144,7 @@ func (t *Tokenizer) Train(path string, verbose bool) error {
 				counts[maxPair])
 		}
 		clear(counts)
+		newIds = newIds[:0]
 	}
 	return nil
 }
@@ -163,13 +163,15 @@ func (t *Tokenizer) Encode(text string) []TokenId {
 		ids[i] = TokenId(idx)
 	}
 	counts := make(map[Pair]int, len(ids)/2)
+	newIds := make([]TokenId, 0, len(ids))
 	for len(ids) >= 2 {
 		pair := t.getMinPair(ids, counts)
 		if pair.Left == TokenId(maxVocabSize) || pair.Right == TokenId(maxVocabSize) {
 			break
 		}
-		ids = replacePairWithNewToken(pair, t.merges[pair], ids)
+		ids = replacePairWithNewToken(pair, t.merges[pair], ids, newIds)
 		clear(counts)
+		newIds = newIds[:0]
 	}
 	return ids
 }

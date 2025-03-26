@@ -2,7 +2,7 @@ package tinybpe
 
 import "testing"
 
-func BenchmarkGetAnswers(b *testing.B) {
+func BenchmarkTrainAndSave(b *testing.B) {
 	b.ResetTimer()
 	numIter := b.N
 	if numIter < minVocabSize {
