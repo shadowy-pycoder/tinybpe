@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
-	"log"
 	"maps"
 	"os"
 	"path/filepath"
@@ -60,7 +59,7 @@ func buildVocabFromMerges(merges map[Pair]TokenId) map[TokenId][]byte {
 
 func NewTokenizer(vocabSize int) *Tokenizer {
 	if vocabSize < minVocabSize || vocabSize == maxVocabSize {
-		log.Fatalf("vocabSize must be within [%d, %d) range\n", minVocabSize, maxVocabSize)
+		panic(fmt.Sprintf("vocabSize must be within [%d, %d) range\n", minVocabSize, maxVocabSize))
 	}
 	tokenizer := Tokenizer{vocabSize: vocabSize}
 	tokenizer.merges = make(map[Pair]TokenId)
@@ -149,12 +148,16 @@ func (t *Tokenizer) Train(path string, verbose bool) error {
 	return nil
 }
 
-func (t *Tokenizer) Decode(ids []TokenId) string {
+func (t *Tokenizer) Decode(ids []TokenId) (string, error) {
 	var sb strings.Builder
-	for _, idx := range ids {
-		sb.Write(t.vocab[idx])
+	for i, idx := range ids {
+		decoded, ok := t.vocab[idx]
+		if !ok {
+			return "", fmt.Errorf("can't decode token `%d` at position %d", idx, i)
+		}
+		sb.Write(decoded)
 	}
-	return sb.String()
+	return sb.String(), nil
 }
 
 func (t *Tokenizer) Encode(text string) []TokenId {
