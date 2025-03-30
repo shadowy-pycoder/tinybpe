@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	minVocabSize int    = 256
-	maxVocabSize int    = int(^uint(0) >> 1)
+	MinVocabSize int    = 256
+	MaxVocabSize int    = int(^uint(0) >> 1)
 	crlf         string = "\r\n"
 )
 
@@ -39,14 +39,13 @@ func replacePairWithNewToken(pair Pair, newTokenId TokenId, ids, newIds []TokenI
 }
 
 type Tokenizer struct {
-	vocab     map[TokenId][]byte
-	vocabSize int
-	merges    map[Pair]TokenId
+	vocab  map[TokenId][]byte
+	merges map[Pair]TokenId
 }
 
 func buildVocabFromMerges(merges map[Pair]TokenId) map[TokenId][]byte {
-	vocab := make(map[TokenId][]byte, len(merges)+minVocabSize)
-	for i := range minVocabSize {
+	vocab := make(map[TokenId][]byte, len(merges)+MinVocabSize)
+	for i := range MinVocabSize {
 		vocab[TokenId(i)] = []byte{byte(i)}
 	}
 	for _, pair := range slices.SortedStableFunc(maps.Keys(merges), func(a, b Pair) int {
@@ -57,11 +56,8 @@ func buildVocabFromMerges(merges map[Pair]TokenId) map[TokenId][]byte {
 	return vocab
 }
 
-func NewTokenizer(vocabSize int) *Tokenizer {
-	if vocabSize < minVocabSize || vocabSize == maxVocabSize {
-		panic(fmt.Sprintf("vocabSize must be within [%d, %d) range\n", minVocabSize, maxVocabSize))
-	}
-	tokenizer := Tokenizer{vocabSize: vocabSize}
+func NewTokenizer() *Tokenizer {
+	tokenizer := Tokenizer{}
 	tokenizer.merges = make(map[Pair]TokenId)
 	tokenizer.vocab = buildVocabFromMerges(tokenizer.merges)
 	return &tokenizer
@@ -90,7 +86,7 @@ func (t *Tokenizer) getMinPair(ids []TokenId, counts map[Pair]int) Pair {
 		count = counts[pair] + 1
 		counts[pair] = count
 	}
-	minCount := TokenId(maxVocabSize)
+	minCount := TokenId(MaxVocabSize)
 	minPair := Pair{Left: minCount, Right: minCount}
 	for _, pr := range slices.Backward(slices.SortedStableFunc(maps.Keys(counts), func(a, b Pair) int {
 		return cmp.Compare(counts[a], counts[b])
@@ -115,21 +111,20 @@ func joinBytes(bs ...[]byte) []byte {
 	return b
 }
 
-func (t *Tokenizer) Train(path string, verbose bool) error {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
+func (t *Tokenizer) Train(raw []byte, vocabSize int, verbose bool) {
+	if vocabSize < MinVocabSize || vocabSize == MaxVocabSize {
+		panic(fmt.Sprintf("vocabSize must be within [%d, %d) range\n", MinVocabSize, MaxVocabSize))
 	}
-	ids := make([]TokenId, len(b))
-	for i := range b {
-		ids[i] = TokenId(b[i])
+	ids := make([]TokenId, len(raw))
+	for i := range raw {
+		ids[i] = TokenId(raw[i])
 	}
-	iterNum := t.vocabSize - minVocabSize
+	iterNum := vocabSize - MinVocabSize
 	counts := make(map[Pair]int, len(ids)/2)
 	newIds := make([]TokenId, 0, len(ids))
 	for i := range iterNum {
 		maxPair := t.getMaxPair(ids, counts)
-		newTokenId := TokenId(minVocabSize + i)
+		newTokenId := TokenId(MinVocabSize + i)
 		t.vocab[newTokenId] = joinBytes(t.vocab[maxPair.Left], t.vocab[maxPair.Right])
 		t.merges[maxPair] = newTokenId
 		ids = replacePairWithNewToken(maxPair, newTokenId, ids, newIds)
@@ -145,7 +140,6 @@ func (t *Tokenizer) Train(path string, verbose bool) error {
 		clear(counts)
 		newIds = newIds[:0]
 	}
-	return nil
 }
 
 func (t *Tokenizer) Decode(ids []TokenId) (string, error) {
@@ -160,16 +154,16 @@ func (t *Tokenizer) Decode(ids []TokenId) (string, error) {
 	return sb.String(), nil
 }
 
-func (t *Tokenizer) Encode(text string) []TokenId {
-	ids := make([]TokenId, len(text))
-	for i, idx := range []byte(text) {
-		ids[i] = TokenId(idx)
+func (t *Tokenizer) Encode(raw []byte) []TokenId {
+	ids := make([]TokenId, len(raw))
+	for i, b := range raw {
+		ids[i] = TokenId(b)
 	}
 	counts := make(map[Pair]int, len(ids)/2)
 	newIds := make([]TokenId, 0, len(ids))
 	for len(ids) >= 2 {
 		pair := t.getMinPair(ids, counts)
-		if pair.Left == TokenId(maxVocabSize) || pair.Right == TokenId(maxVocabSize) {
+		if pair.Left == TokenId(MaxVocabSize) || pair.Right == TokenId(MaxVocabSize) {
 			break
 		}
 		ids = replacePairWithNewToken(pair, t.merges[pair], ids, newIds)
@@ -226,43 +220,44 @@ func (t *Tokenizer) Save(modelName string) error {
 	return nil
 }
 
-func (t *Tokenizer) Load(modelName string) error {
+func Load(modelName string) (*Tokenizer, error) {
 	modelPath := filepath.FromSlash(modelName)
 	if filepath.Ext(modelPath) != ".model" {
-		return fmt.Errorf("model file should have .model extension")
+		return nil, fmt.Errorf("model file should have .model extension")
 	}
 	b, err := os.ReadFile(modelPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	lines := bytes.Lines(b)
 	for line := range lines {
 		if !bytes.Equal(bytes.TrimRight(line, crlf), []byte(Version)) {
-			return fmt.Errorf("version does not match")
+			return nil, fmt.Errorf("version does not match")
 		}
 		break
 	}
 
-	idx := TokenId(minVocabSize)
+	idx := TokenId(MinVocabSize)
 	merges := make(map[Pair]TokenId)
 	for line := range lines {
 		merge := strings.Split(string(bytes.TrimRight(line, crlf)), " ")
 		if len(merge) != 2 {
-			return fmt.Errorf("malformed file")
+			return nil, fmt.Errorf("malformed model file")
 		}
 		left, err := strconv.Atoi(merge[0])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		right, err := strconv.Atoi(merge[1])
 		if err != nil {
-			return err
+			return nil, err
 		}
 		pair := Pair{Left: TokenId(left), Right: TokenId(right)}
 		merges[pair] = idx
 		idx++
 	}
-	t.merges = merges
-	t.vocab = buildVocabFromMerges(merges)
-	return nil
+	tokenizer := Tokenizer{}
+	tokenizer.merges = merges
+	tokenizer.vocab = buildVocabFromMerges(merges)
+	return &tokenizer, nil
 }

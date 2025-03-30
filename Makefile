@@ -6,7 +6,7 @@ all: build
 
 .PHONY: build
 build: 
-	CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath -o ./bin/${APP_NAME} ./cmd/${APP_NAME}/*.go
+	go build -ldflags "-s -w" -trimpath -o ./bin/${APP_NAME} ./cmd/${APP_NAME}/*.go
 
 .PHONY: bench test
 bench: 
