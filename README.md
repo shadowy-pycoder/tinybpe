@@ -1,5 +1,13 @@
 # TinyBPE Library
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Reference](https://pkg.go.dev/badge/github.com/shadowy-pycoder/tinybpe.svg)](https://pkg.go.dev/github.com/shadowy-pycoder/tinybpe)
+![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/shadowy-pycoder/tinybpe)
+[![Go Report Card](https://goreportcard.com/badge/github.com/shadowy-pycoder/tinybpe)](https://goreportcard.com/report/github.com/shadowy-pycoder/tinybpe)
+![GitHub Release](https://img.shields.io/github/v/release/shadowy-pycoder/tinybpe)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/shadowy-pycoder/tinybpe/total)
+
+
 ## Installation
 
 ```shell
