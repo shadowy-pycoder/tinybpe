@@ -47,3 +47,7 @@ func main() {
 	fmt.Println(text)
 }
 ```
+
+# TinyBPE CLI
+
+See here: [README.md](./cmd/tinybpe/README.md)
